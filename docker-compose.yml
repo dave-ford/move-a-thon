@@ -1,0 +1,25 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: moveathon
+      POSTGRES_PASSWORD: moveathon
+      POSTGRES_DB: moveathon
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  app:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://moveathon:moveathon@postgres:5432/moveathon
+      ADMIN_PIN: "1234"
+      SECRET_KEY: change-this-for-production
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+
+volumes:
+  postgres-data:
