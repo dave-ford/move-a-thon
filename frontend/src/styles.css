@@ -103,6 +103,7 @@ input {
   grid-template-rows: auto minmax(250px, 1fr) auto auto auto;
   gap: 1rem;
   padding: 1rem;
+  overscroll-behavior: none;
 }
 
 .mini-status,
@@ -138,6 +139,14 @@ input {
   color: #fff;
   font-size: clamp(4rem, 18vw, 9rem);
   font-weight: 900;
+  touch-action: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+.tap-button:active {
+  transform: scale(0.995);
 }
 
 .official-totals {

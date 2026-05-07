@@ -190,7 +190,7 @@ const Official = {
           <span>{{ state.event?.name || 'No active event' }}</span>
           <span :class="{ online: connected }">{{ connected ? 'live' : 'reconnecting' }}</span>
         </div>
-        <button class="tap-button" :disabled="!state.event" @click="tap">+1 Lap</button>
+        <button class="tap-button" :disabled="!state.event" @pointerdown.prevent="tap">+1 Lap</button>
         <div class="official-totals">
           <strong>{{ visibleLaps.toLocaleString() }}</strong>
           <span>laps</span>
