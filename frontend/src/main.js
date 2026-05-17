@@ -472,7 +472,7 @@ const Admin = {
       <section v-if="!loggedIn" class="login-panel">
         <h1>Admin</h1>
         <form @submit.prevent="login" class="login-form">
-          <input v-model="pin" type="password" inputmode="numeric" placeholder="Admin PIN" />
+          <input v-model="pin" type="password" inputmode="text" autocomplete="off" placeholder="Admin PIN" />
           <button type="submit">Unlock</button>
         </form>
         <p v-if="error" class="error">{{ error }}</p>
