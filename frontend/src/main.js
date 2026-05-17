@@ -256,6 +256,24 @@ const TV = {
     const specialCountdown = computed(() => formatDuration(specialRemaining.value));
     const distanceToNext = computed(() => Number(journey.value.distance_to_next || 0).toFixed(1));
     const reachedStops = computed(() => (journey.value.stops || []).filter((stop) => stop.reached).length);
+    const routeFocusStops = computed(() => {
+      const stops = journey.value.stops || [];
+      if (!stops.length) return [];
+      const currentIndex = Math.max(0, stops.findLastIndex((stop) => stop.reached));
+      const focusIndexes = [0, currentIndex, currentIndex + 1, currentIndex + 2, stops.length - 1];
+      return [...new Set(focusIndexes)]
+        .filter((index) => index >= 0 && index < stops.length)
+        .map((index) => ({
+          ...stops[index],
+          role: index === 0
+            ? 'Start'
+            : index === stops.length - 1
+              ? 'Finish'
+              : index === currentIndex
+                ? 'Reached'
+                : 'Next',
+        }));
+    });
     let timer;
 
     onMounted(() => {
@@ -277,6 +295,7 @@ const TV = {
       specialCountdown,
       distanceToNext,
       reachedStops,
+      routeFocusStops,
     };
   },
   template: `
@@ -309,11 +328,12 @@ const TV = {
           </div>
           <ol class="route-stops">
             <li
-              v-for="stop in journey.stops"
+              v-for="stop in routeFocusStops"
               :key="stop.name"
-              :class="{ reached: stop.reached, major: stop.major }"
+              :class="{ reached: stop.reached, major: stop.major, finish: stop.role === 'Finish' }"
             >
               <span></span>
+              <em>{{ stop.role }}</em>
               <strong>{{ stop.name }}</strong>
               <small>{{ stop.distance }} miles from Cambridge</small>
             </li>

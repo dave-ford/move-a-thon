@@ -319,7 +319,7 @@ input {
 .route-stops {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 0.5rem;
+  gap: 0.75rem;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -328,14 +328,26 @@ input {
 .route-stops li {
   display: grid;
   gap: 0.35rem;
+  align-content: start;
+  min-width: 0;
   color: #657067;
   font-size: clamp(0.75rem, 1.2vw, 1rem);
   font-weight: 800;
 }
 
+.route-stops li em {
+  display: block;
+  color: #8a3d2c;
+  font-size: 0.8em;
+  font-style: normal;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
 .route-stops li strong,
 .route-stops li small {
   display: block;
+  overflow-wrap: anywhere;
 }
 
 .route-stops li small {
@@ -376,6 +388,15 @@ input {
 
 .route-stops li.major.reached span {
   background: #d9472f;
+}
+
+.route-stops li.finish span {
+  border-color: #f4c542;
+  background: #fff7df;
+}
+
+.route-stops li.finish.reached span {
+  background: #f4c542;
 }
 
 .journey-stats {
@@ -594,10 +615,6 @@ td {
   .scoreboard {
     grid-template-columns: 1fr;
     display: grid;
-  }
-
-  .route-stops {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .journey-stats,
