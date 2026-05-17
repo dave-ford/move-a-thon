@@ -36,10 +36,14 @@ const api = async (path, options = {}) => {
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({ detail: response.statusText }));
-    throw new Error(body.detail || response.statusText);
+    const error = new Error(body.detail || response.statusText);
+    error.status = response.status;
+    throw error;
   }
   return response.json();
 };
+
+const checkAdminSession = () => api('/api/admin/session');
 
 const makeClientEntryId = () => {
   if (crypto.randomUUID) {
@@ -132,7 +136,7 @@ const useLiveState = () => {
 const Nav = {
   template: `
     <nav class="nav">
-      <a href="/official">Official</a>
+      <a href="/official">Lap Counter</a>
       <a href="/tv">TV</a>
       <a href="/admin">Admin</a>
     </nav>
@@ -145,6 +149,7 @@ const Official = {
     const { state, connected } = useLiveState();
     const code = ref('');
     const loggedIn = ref(false);
+    const checkingSession = ref(true);
     const error = ref('');
     const pending = ref(0);
     const localAdds = ref(0);
@@ -161,7 +166,7 @@ const Official = {
     const login = async () => {
       error.value = '';
       try {
-        await api('/api/official/login', { method: 'POST', body: JSON.stringify({ code: code.value }) });
+        await api('/api/admin/login', { method: 'POST', body: JSON.stringify({ code: code.value }) });
         loggedIn.value = true;
         await sync();
       } catch (err) {
@@ -171,6 +176,10 @@ const Official = {
 
     const sync = async () => {
       if (syncing.value) return;
+      if (!loggedIn.value) {
+        await refreshPending();
+        return;
+      }
       syncing.value = true;
       try {
         const entries = await getPendingTaps();
@@ -182,7 +191,10 @@ const Official = {
         await Promise.all(entries.map((entry) => deletePendingTap(entry.client_entry_id)));
         state.value = result.state;
         await refreshPending();
-      } catch {
+      } catch (err) {
+        if (err.status === 401) {
+          loggedIn.value = false;
+        }
         await refreshPending();
       } finally {
         syncing.value = false;
@@ -199,21 +211,49 @@ const Official = {
       sync();
     };
 
+    let syncTimer;
     onMounted(async () => {
+      try {
+        await checkAdminSession();
+        loggedIn.value = true;
+      } catch {
+        loggedIn.value = false;
+      } finally {
+        checkingSession.value = false;
+      }
       await refreshPending();
       window.addEventListener('online', sync);
-      setInterval(sync, 4000);
+      syncTimer = setInterval(sync, 4000);
+      if (loggedIn.value) sync();
     });
 
-    return { state, connected, code, loggedIn, error, pending, visibleLaps, visibleMiles, login, tap, sync };
+    onUnmounted(() => {
+      clearInterval(syncTimer);
+      window.removeEventListener('online', sync);
+    });
+
+    return {
+      state,
+      connected,
+      code,
+      loggedIn,
+      checkingSession,
+      error,
+      pending,
+      visibleLaps,
+      visibleMiles,
+      login,
+      tap,
+      sync,
+    };
   },
   template: `
     <main class="screen official">
       <Nav />
-      <section v-if="!loggedIn" class="login-panel">
-        <h1>Official Check-In</h1>
+      <section v-if="!loggedIn && !checkingSession" class="login-panel">
+        <h1>Admin Check-In</h1>
         <form @submit.prevent="login" class="login-form">
-          <input v-model="code" autocomplete="off" inputmode="text" placeholder="Official code" />
+          <input v-model="code" type="password" autocomplete="off" inputmode="text" placeholder="Admin PIN" />
           <button type="submit">Join</button>
         </form>
         <p v-if="error" class="error">{{ error }}</p>
@@ -363,12 +403,13 @@ const Admin = {
     const { state, connected, load } = useLiveState();
     const pin = ref('');
     const loggedIn = ref(false);
+    const checkingSession = ref(true);
     const error = ref('');
     const events = ref([]);
     const schoolName = ref('');
     const correction = ref(1);
     const qr = ref('');
-    const form = ref({ name: 'Move-a-thon 2026', lap_distance_miles: 0.25, official_code: 'run' });
+    const form = ref({ name: 'Move-a-thon 2026', lap_distance_miles: 0.25 });
     const edit = ref(null);
     const specialDurationMinutes = ref(3);
     const now = ref(Date.now());
@@ -414,12 +455,12 @@ const Admin = {
 
     const createEvent = async () => {
       await api('/api/events', { method: 'POST', body: JSON.stringify(form.value) });
-      form.value = { name: '', lap_distance_miles: form.value.lap_distance_miles, official_code: form.value.official_code };
+      form.value = { name: '', lap_distance_miles: form.value.lap_distance_miles };
       await refresh();
     };
 
     const startEdit = (event) => {
-      edit.value = { ...event, official_code: '' };
+      edit.value = { ...event };
     };
 
     const saveEdit = async () => {
@@ -449,7 +490,16 @@ const Admin = {
     const exportUrl = (event) => `/api/admin/export/${event.id}.csv`;
 
     let timer;
-    onMounted(() => {
+    onMounted(async () => {
+      try {
+        await checkAdminSession();
+        loggedIn.value = true;
+        await refresh();
+      } catch {
+        loggedIn.value = false;
+      } finally {
+        checkingSession.value = false;
+      }
       timer = setInterval(() => {
         now.value = Date.now();
       }, 1000);
@@ -460,7 +510,7 @@ const Admin = {
     });
 
     return {
-      state, connected, pin, loggedIn, error, events, schoolName, correction, qr, form, edit, specialDurationMinutes,
+      state, connected, pin, loggedIn, checkingSession, error, events, schoolName, correction, qr, form, edit, specialDurationMinutes,
       specialLapPresets, activeSpecialLap, specialCountdown,
       login, refresh, saveSettings, createEvent, startEdit, saveEdit, activate, addCorrection, startSpecialLap,
       clearSpecialLap, exportUrl,
@@ -469,7 +519,7 @@ const Admin = {
   template: `
     <main class="screen admin">
       <Nav />
-      <section v-if="!loggedIn" class="login-panel">
+      <section v-if="!loggedIn && !checkingSession" class="login-panel">
         <h1>Admin</h1>
         <form @submit.prevent="login" class="login-form">
           <input v-model="pin" type="password" inputmode="text" autocomplete="off" placeholder="Admin PIN" />
@@ -526,9 +576,9 @@ const Admin = {
         </div>
 
         <div class="panel">
-          <h2>Official QR</h2>
-          <img v-if="qr" class="qr" :src="qr" alt="Official page QR code" />
-          <p class="muted">Officials scan this, then enter the active event's official code.</p>
+          <h2>Lap Counter QR</h2>
+          <img v-if="qr" class="qr" :src="qr" alt="Lap counter page QR code" />
+          <p class="muted">Counters scan this, then sign in with the admin PIN.</p>
         </div>
 
         <div class="panel">
@@ -544,7 +594,6 @@ const Admin = {
           <form @submit.prevent="createEvent" class="event-form">
             <input v-model="form.name" placeholder="Event name" />
             <input v-model.number="form.lap_distance_miles" type="number" min="0.001" step="0.001" />
-            <input v-model="form.official_code" placeholder="Official code" />
             <button>Create</button>
           </form>
         </div>
@@ -574,7 +623,6 @@ const Admin = {
             <h2>Edit Event</h2>
             <input v-model="edit.name" />
             <input v-model.number="edit.lap_distance_miles" type="number" min="0.001" step="0.001" />
-            <input v-model="edit.official_code" placeholder="New official code, optional" />
             <div class="actions">
               <button>Save</button>
               <button type="button" class="secondary" @click="edit = null">Cancel</button>

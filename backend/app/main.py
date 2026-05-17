@@ -74,13 +74,11 @@ class LoginRequest(BaseModel):
 class EventRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     lap_distance_miles: Decimal = Field(gt=0)
-    official_code: str = Field(min_length=1, max_length=128)
 
 
 class EventPatchRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     lap_distance_miles: Decimal = Field(gt=0)
-    official_code: str | None = Field(default=None, max_length=128)
 
 
 class LapEntryRequest(BaseModel):
@@ -107,13 +105,8 @@ class SpecialLapRequest(BaseModel):
 
 
 def admin_required(admin_token: str | None = Cookie(default=None)) -> None:
-    if not verify_token(admin_token, "admin"):
+    if not verify_token(admin_token):
         raise HTTPException(status_code=401, detail="Admin login required")
-
-
-def official_required(official_token: str | None = Cookie(default=None)) -> None:
-    if not verify_token(official_token, "official"):
-        raise HTTPException(status_code=401, detail="Official login required")
 
 
 def row_to_json(row: dict[str, Any]) -> dict[str, Any]:
@@ -241,29 +234,18 @@ def admin_login(payload: LoginRequest, response: Response) -> dict[str, str]:
         digest = conn.execute("SELECT admin_pin_hash FROM settings WHERE id = 1").fetchone()["admin_pin_hash"]
     if not verify_secret(payload.code, "admin", digest):
         raise HTTPException(status_code=401, detail="Invalid admin PIN")
-    response.set_cookie("admin_token", sign_token("admin"), httponly=True, samesite="lax")
+    response.set_cookie("admin_token", sign_token(), httponly=True, samesite="lax")
     return {"status": "ok"}
 
 
-@app.post("/api/official/login")
-def official_login(payload: LoginRequest, response: Response) -> dict[str, str]:
-    with get_conn() as conn:
-        event = conn.execute("SELECT official_code_hash FROM events WHERE is_active = true").fetchone()
-    if not event or not verify_secret(payload.code, "official", event["official_code_hash"]):
-        raise HTTPException(status_code=401, detail="Invalid official code")
-    response.set_cookie("official_token", sign_token("official"), httponly=True, samesite="lax")
+@app.get("/api/admin/session", dependencies=[Depends(admin_required)])
+def admin_session() -> dict[str, str]:
     return {"status": "ok"}
 
 
 @app.post("/api/admin/logout")
 def admin_logout(response: Response) -> dict[str, str]:
     response.delete_cookie("admin_token")
-    return {"status": "ok"}
-
-
-@app.post("/api/official/logout")
-def official_logout(response: Response) -> dict[str, str]:
-    response.delete_cookie("official_token")
     return {"status": "ok"}
 
 
@@ -292,7 +274,7 @@ async def create_event(payload: EventRequest) -> dict[str, Any]:
             VALUES (%s, %s, %s)
             RETURNING id, name, lap_distance_miles, is_active, created_at, started_at, ended_at;
             """,
-            (payload.name, payload.lap_distance_miles, hash_secret(payload.official_code, "official")),
+            (payload.name, payload.lap_distance_miles, hash_secret("", "admin")),
         ).fetchone()
         conn.commit()
     return row_to_json(row)
@@ -301,26 +283,15 @@ async def create_event(payload: EventRequest) -> dict[str, Any]:
 @app.patch("/api/events/{event_id}", dependencies=[Depends(admin_required)])
 async def update_event(event_id: int, payload: EventPatchRequest) -> dict[str, Any]:
     with get_conn() as conn:
-        if payload.official_code:
-            row = conn.execute(
-                """
-                UPDATE events
-                SET name = %s, lap_distance_miles = %s, official_code_hash = %s
-                WHERE id = %s
-                RETURNING id, name, lap_distance_miles, is_active, created_at, started_at, ended_at;
-                """,
-                (payload.name, payload.lap_distance_miles, hash_secret(payload.official_code, "official"), event_id),
-            ).fetchone()
-        else:
-            row = conn.execute(
-                """
-                UPDATE events
-                SET name = %s, lap_distance_miles = %s
-                WHERE id = %s
-                RETURNING id, name, lap_distance_miles, is_active, created_at, started_at, ended_at;
-                """,
-                (payload.name, payload.lap_distance_miles, event_id),
-            ).fetchone()
+        row = conn.execute(
+            """
+            UPDATE events
+            SET name = %s, lap_distance_miles = %s
+            WHERE id = %s
+            RETURNING id, name, lap_distance_miles, is_active, created_at, started_at, ended_at;
+            """,
+            (payload.name, payload.lap_distance_miles, event_id),
+        ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Event not found")
         conn.commit()
@@ -401,12 +372,12 @@ async def clear_special_lap() -> dict[str, Any]:
     return get_state()
 
 
-@app.post("/api/laps", dependencies=[Depends(official_required)])
+@app.post("/api/laps", dependencies=[Depends(admin_required)])
 async def add_lap(payload: LapEntryRequest) -> dict[str, Any]:
     return await add_laps(LapBatchRequest(entries=[payload]))
 
 
-@app.post("/api/laps/batch", dependencies=[Depends(official_required)])
+@app.post("/api/laps/batch", dependencies=[Depends(admin_required)])
 async def add_laps(payload: LapBatchRequest) -> dict[str, Any]:
     if not payload.entries:
         return {"accepted": 0, "state": get_state()}

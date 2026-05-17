@@ -84,6 +84,6 @@ def init_db() -> None:
                 INSERT INTO events (name, lap_distance_miles, official_code_hash, is_active, started_at)
                 VALUES (%s, %s, %s, true, now());
                 """,
-                ("Test Event", 0.25, hash_secret("run", "official")),
+                ("Test Event", 0.25, hash_secret("", "admin")),
             )
         conn.commit()

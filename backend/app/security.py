@@ -2,12 +2,10 @@ import base64
 import hashlib
 import hmac
 import time
-from typing import Literal
-
 from .config import settings
 
 
-Role = Literal["admin", "official"]
+ROLE = "admin"
 
 
 def hash_secret(value: str, salt: str) -> str:
@@ -18,14 +16,14 @@ def verify_secret(value: str, salt: str, digest: str) -> bool:
     return hmac.compare_digest(hash_secret(value, salt), digest)
 
 
-def sign_token(role: Role, ttl_seconds: int = 60 * 60 * 12) -> str:
+def sign_token(ttl_seconds: int = 60 * 60 * 12) -> str:
     expires = int(time.time()) + ttl_seconds
-    body = f"{role}:{expires}"
+    body = f"{ROLE}:{expires}"
     sig = hmac.new(settings.secret_key.encode(), body.encode(), hashlib.sha256).digest()
     return base64.urlsafe_b64encode(body.encode() + b"." + sig).decode()
 
 
-def verify_token(token: str | None, role: Role) -> bool:
+def verify_token(token: str | None) -> bool:
     if not token:
         return False
     try:
@@ -37,6 +35,6 @@ def verify_token(token: str | None, role: Role) -> bool:
         return False
     return (
         hmac.compare_digest(sig, expected)
-        and decoded_role == role
+        and decoded_role == ROLE
         and int(expires) >= int(time.time())
     )
