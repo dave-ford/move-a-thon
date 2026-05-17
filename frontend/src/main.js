@@ -359,8 +359,8 @@ const TV = {
         <section v-if="journey.current" class="journey-panel">
           <div class="journey-copy">
             <p>{{ journey.title }}</p>
-            <h2>{{ journey.completed ? 'We made it to Washington, DC!' : 'Now passing: ' + journey.current.name }}</h2>
-            <strong v-if="journey.next">Next up: {{ journey.next.name }} - {{ distanceToNext }} miles away</strong>
+            <h2 v-if="journey.next">Next up: {{ journey.next.name }} - {{ distanceToNext }} miles away</h2>
+            <h2 v-else>We made it to Washington, DC!</h2>
             <strong v-else>Destination reached</strong>
           </div>
           <div class="route-bar" aria-hidden="true">
