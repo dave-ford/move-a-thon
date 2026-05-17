@@ -37,15 +37,24 @@ SPECIAL_LAPS = {
 
 JOURNEY_STOPS = [
     {"name": "Cambridge, MA", "distance": 0, "major": True},
-    {"name": "Providence, RI", "distance": 50, "major": True},
-    {"name": "New Haven, CT", "distance": 136, "major": False},
-    {"name": "New York City", "distance": 216, "major": True},
-    {"name": "Newark, NJ", "distance": 226, "major": False},
-    {"name": "Trenton, NJ", "distance": 284, "major": False},
-    {"name": "Philadelphia, PA", "distance": 319, "major": True},
-    {"name": "Wilmington, DE", "distance": 347, "major": False},
-    {"name": "Baltimore, MD", "distance": 415, "major": True},
-    {"name": "Washington, DC", "distance": 455, "major": True},
+    {"name": "Foxborough, MA", "distance": 32.3, "major": False},
+    {"name": "Providence, RI", "distance": 53.5, "major": True},
+    {"name": "Newport, RI", "distance": 72.8, "major": False},
+    {"name": "Mystic, CT", "distance": 101.9, "major": False},
+    {"name": "New London, CT", "distance": 110.6, "major": False},
+    {"name": "New Haven, CT", "distance": 134.6, "major": False},
+    {"name": "Bridgeport, CT", "distance": 150.2, "major": False},
+    {"name": "Stamford, CT", "distance": 172.7, "major": False},
+    {"name": "New York City", "distance": 212.2, "major": True},
+    {"name": "Newark, NJ", "distance": 221.5, "major": False},
+    {"name": "Princeton, NJ", "distance": 262.6, "major": False},
+    {"name": "Trenton, NJ", "distance": 270.8, "major": False},
+    {"name": "Philadelphia, PA", "distance": 304.6, "major": True},
+    {"name": "Wilmington, DE", "distance": 332.9, "major": False},
+    {"name": "Havre de Grace, MD", "distance": 364.7, "major": False},
+    {"name": "Baltimore, MD", "distance": 397.8, "major": True},
+    {"name": "College Park, MD", "distance": 429.1, "major": False},
+    {"name": "Washington, DC", "distance": 436.3, "major": True},
 ]
 
 if settings.cors_origin:
