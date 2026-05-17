@@ -2,7 +2,7 @@ import asyncio
 import csv
 import io
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -20,6 +20,33 @@ from .security import hash_secret, sign_token, verify_secret, verify_token
 
 app = FastAPI(title="Move-a-thon")
 live_clients: set[asyncio.Queue[dict[str, Any]]] = set()
+
+SPECIAL_LAPS = {
+    "/special-laps/Fast.png": "Fast Lap",
+    "/special-laps/Loudest.png": "Loudest Lap",
+    "/special-laps/Onefoot.png": "One-Foot Lap",
+    "/special-laps/Pirate.png": "Pirate Lap",
+    "/special-laps/Quietest.png": "Quietest Lap",
+    "/special-laps/Sidefoot.png": "Side-Foot Lap",
+    "/special-laps/Skipped.png": "Skipped Lap",
+    "/special-laps/Slowest.png": "Slowest Lap",
+    "/special-laps/bucketball.png": "Bucketball Lap",
+    "/special-laps/partner.png": "Partner Lap",
+    "/special-laps/two-footed.png": "Two-Footed Lap",
+}
+
+JOURNEY_STOPS = [
+    {"name": "Cambridge, MA", "distance": 0, "major": True},
+    {"name": "Providence, RI", "distance": 50, "major": True},
+    {"name": "New Haven, CT", "distance": 136, "major": False},
+    {"name": "New York City", "distance": 216, "major": True},
+    {"name": "Newark, NJ", "distance": 226, "major": False},
+    {"name": "Trenton, NJ", "distance": 284, "major": False},
+    {"name": "Philadelphia, PA", "distance": 319, "major": True},
+    {"name": "Wilmington, DE", "distance": 347, "major": False},
+    {"name": "Baltimore, MD", "distance": 415, "major": True},
+    {"name": "Washington, DC", "distance": 455, "major": True},
+]
 
 if settings.cors_origin:
     app.add_middleware(
@@ -62,6 +89,12 @@ class CorrectionRequest(BaseModel):
 
 class SettingsRequest(BaseModel):
     school_name: str = Field(min_length=1, max_length=120)
+    special_lap_duration_seconds: int = Field(default=180, ge=15, le=3600)
+
+
+class SpecialLapRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    image_path: str = Field(min_length=1, max_length=160)
 
 
 def admin_required(admin_token: str | None = Cookie(default=None)) -> None:
@@ -78,9 +111,62 @@ def row_to_json(row: dict[str, Any]) -> dict[str, Any]:
     return {key: float(value) if isinstance(value, Decimal) else value for key, value in row.items()}
 
 
+def get_active_special_lap(settings_row: dict[str, Any], now: datetime | None = None) -> dict[str, Any] | None:
+    ends_at = settings_row["special_lap_ends_at"]
+    if not ends_at:
+        return None
+    now = now or datetime.now(timezone.utc)
+    if ends_at <= now:
+        return None
+    return {
+        "name": settings_row["special_lap_name"],
+        "image_path": settings_row["special_lap_image_path"],
+        "started_at": settings_row["special_lap_started_at"],
+        "ends_at": ends_at,
+    }
+
+
+def get_journey(miles: float) -> dict[str, Any]:
+    total_distance = JOURNEY_STOPS[-1]["distance"]
+    current = JOURNEY_STOPS[0]
+    next_stop = None
+    for stop in JOURNEY_STOPS:
+        if miles >= stop["distance"]:
+            current = stop
+        elif next_stop is None:
+            next_stop = stop
+            break
+
+    completed = miles >= total_distance
+    return {
+        "title": "Cambridge to DC",
+        "miles": miles,
+        "total_distance": total_distance,
+        "progress_percent": min(100, max(0, miles / total_distance * 100)) if total_distance else 0,
+        "current": current,
+        "next": next_stop,
+        "distance_to_next": max(0, next_stop["distance"] - miles) if next_stop else 0,
+        "completed": completed,
+        "stops": [
+            {
+                **stop,
+                "reached": miles >= stop["distance"],
+            }
+            for stop in JOURNEY_STOPS
+        ],
+    }
+
+
 def get_state() -> dict[str, Any]:
     with get_conn() as conn:
-        settings_row = conn.execute("SELECT school_name FROM settings WHERE id = 1").fetchone()
+        settings_row = conn.execute(
+            """
+            SELECT school_name, special_lap_duration_seconds, special_lap_name, special_lap_image_path,
+                   special_lap_started_at, special_lap_ends_at
+            FROM settings
+            WHERE id = 1;
+            """
+        ).fetchone()
         event = conn.execute(
             """
             SELECT id, name, lap_distance_miles, is_active, created_at, started_at, ended_at
@@ -89,18 +175,31 @@ def get_state() -> dict[str, Any]:
             LIMIT 1;
             """
         ).fetchone()
+        active_special_lap = get_active_special_lap(settings_row)
         if not event:
-            return {"school_name": settings_row["school_name"], "event": None, "laps": 0, "miles": 0}
+            return {
+                "school_name": settings_row["school_name"],
+                "special_lap_duration_seconds": settings_row["special_lap_duration_seconds"],
+                "active_special_lap": active_special_lap,
+                "journey": get_journey(0),
+                "event": None,
+                "laps": 0,
+                "miles": 0,
+            }
         laps = conn.execute(
             "SELECT COALESCE(SUM(delta), 0)::int AS total FROM lap_entries WHERE event_id = %s",
             (event["id"],),
         ).fetchone()["total"]
         lap_distance = Decimal(event["lap_distance_miles"])
+        miles = float(Decimal(laps) * lap_distance)
         return {
             "school_name": settings_row["school_name"],
+            "special_lap_duration_seconds": settings_row["special_lap_duration_seconds"],
+            "active_special_lap": active_special_lap,
+            "journey": get_journey(miles),
             "event": row_to_json(event),
             "laps": laps,
-            "miles": float(Decimal(laps) * lap_distance),
+            "miles": miles,
         }
 
 
@@ -236,10 +335,61 @@ async def activate_event(event_id: int) -> dict[str, str]:
 @app.post("/api/admin/settings", dependencies=[Depends(admin_required)])
 async def update_settings(payload: SettingsRequest) -> dict[str, str]:
     with get_conn() as conn:
-        conn.execute("UPDATE settings SET school_name = %s WHERE id = 1", (payload.school_name,))
+        conn.execute(
+            """
+            UPDATE settings
+            SET school_name = %s, special_lap_duration_seconds = %s
+            WHERE id = 1;
+            """,
+            (payload.school_name, payload.special_lap_duration_seconds),
+        )
         conn.commit()
     await publish_state()
     return {"status": "ok"}
+
+
+@app.post("/api/admin/special-lap", dependencies=[Depends(admin_required)])
+async def start_special_lap(payload: SpecialLapRequest) -> dict[str, Any]:
+    if payload.image_path not in SPECIAL_LAPS:
+        raise HTTPException(status_code=400, detail="Unknown special lap image")
+    name = SPECIAL_LAPS[payload.image_path]
+    now = datetime.now(timezone.utc)
+    with get_conn() as conn:
+        duration = conn.execute("SELECT special_lap_duration_seconds FROM settings WHERE id = 1").fetchone()[
+            "special_lap_duration_seconds"
+        ]
+        conn.execute(
+            """
+            UPDATE settings
+            SET special_lap_name = %s,
+                special_lap_image_path = %s,
+                special_lap_started_at = %s,
+                special_lap_ends_at = %s
+            WHERE id = 1;
+            """,
+            (name, payload.image_path, now, now + timedelta(seconds=duration)),
+        )
+        conn.commit()
+    await publish_state()
+    return get_state()
+
+
+@app.delete("/api/admin/special-lap", dependencies=[Depends(admin_required)])
+async def clear_special_lap() -> dict[str, Any]:
+    with get_conn() as conn:
+        conn.execute(
+            """
+            UPDATE settings
+            SET special_lap_name = NULL,
+                special_lap_image_path = NULL,
+                special_lap_started_at = NULL,
+                special_lap_ends_at = NULL
+            WHERE id = 1;
+            """
+        )
+        conn.commit()
+    await publish_state()
+    return get_state()
 
 
 @app.post("/api/laps", dependencies=[Depends(official_required)])
@@ -342,6 +492,9 @@ async def live() -> StreamingResponse:
 static_dir = Path(__file__).resolve().parents[2] / "static"
 if static_dir.exists():
     app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
+    special_laps_dir = static_dir / "special-laps"
+    if special_laps_dir.exists():
+        app.mount("/special-laps", StaticFiles(directory=special_laps_dir), name="special-laps")
 
 
 @app.get("/{path:path}")

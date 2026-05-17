@@ -28,6 +28,11 @@ def init_db() -> None:
                 id integer PRIMARY KEY DEFAULT 1,
                 school_name text NOT NULL DEFAULT 'Move-a-thon',
                 admin_pin_hash text NOT NULL,
+                special_lap_duration_seconds integer NOT NULL DEFAULT 180,
+                special_lap_name text,
+                special_lap_image_path text,
+                special_lap_started_at timestamptz,
+                special_lap_ends_at timestamptz,
                 CHECK (id = 1)
             );
 
@@ -58,6 +63,11 @@ def init_db() -> None:
             );
             """
         )
+        conn.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS special_lap_duration_seconds integer NOT NULL DEFAULT 180;")
+        conn.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS special_lap_name text;")
+        conn.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS special_lap_image_path text;")
+        conn.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS special_lap_started_at timestamptz;")
+        conn.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS special_lap_ends_at timestamptz;")
         admin_hash = hash_secret(settings.admin_pin, "admin")
         conn.execute(
             """

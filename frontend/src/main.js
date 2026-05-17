@@ -1,6 +1,32 @@
-import { createApp, computed, onMounted, ref } from 'vue';
+import { createApp, computed, onMounted, onUnmounted, ref } from 'vue';
 import QRCode from 'qrcode';
 import './styles.css';
+
+const specialLapPresets = [
+  { name: 'Fast Lap', image_path: '/special-laps/Fast.png', prompt: 'Pick up the pace!' },
+  { name: 'Loudest Lap', image_path: '/special-laps/Loudest.png', prompt: 'Make some noise!' },
+  { name: 'One-Foot Lap', image_path: '/special-laps/Onefoot.png', prompt: 'Hop with care!' },
+  { name: 'Pirate Lap', image_path: '/special-laps/Pirate.png', prompt: 'Sail around the course!' },
+  { name: 'Quietest Lap', image_path: '/special-laps/Quietest.png', prompt: 'Sneak through silently!' },
+  { name: 'Side-Foot Lap', image_path: '/special-laps/Sidefoot.png', prompt: 'Slide those feet sideways!' },
+  { name: 'Skipped Lap', image_path: '/special-laps/Skipped.png', prompt: 'Skip all the way!' },
+  { name: 'Slowest Lap', image_path: '/special-laps/Slowest.png', prompt: 'Take it slow and steady!' },
+  { name: 'Bucketball Lap', image_path: '/special-laps/bucketball.png', prompt: 'Bring the bucketball energy!' },
+  { name: 'Partner Lap', image_path: '/special-laps/partner.png', prompt: 'Find a buddy!' },
+  { name: 'Two-Footed Lap', image_path: '/special-laps/two-footed.png', prompt: 'Jump forward together!' },
+];
+
+const formatDuration = (seconds) => {
+  const safeSeconds = Math.max(0, Math.ceil(seconds || 0));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainder = safeSeconds % 60;
+  return `${minutes}:${remainder.toString().padStart(2, '0')}`;
+};
+
+const getRemainingSeconds = (specialLap, now) => {
+  if (!specialLap?.ends_at) return 0;
+  return Math.max(0, Math.ceil((new Date(specialLap.ends_at).getTime() - now) / 1000));
+};
 
 const api = async (path, options = {}) => {
   const response = await fetch(path, {
@@ -67,7 +93,15 @@ const getPendingTaps = async () =>
   });
 
 const useLiveState = () => {
-  const state = ref({ school_name: 'Move-a-thon', event: null, laps: 0, miles: 0 });
+  const state = ref({
+    school_name: 'Move-a-thon',
+    special_lap_duration_seconds: 180,
+    active_special_lap: null,
+    journey: null,
+    event: null,
+    laps: 0,
+    miles: 0,
+  });
   const connected = ref(false);
 
   const load = async () => {
@@ -208,9 +242,42 @@ const TV = {
   components: { Nav },
   setup() {
     const { state, connected } = useLiveState();
-    const nextLap = computed(() => Math.ceil(((state.value.laps || 0) + 1) / 100) * 100);
-    const nextMile = computed(() => Math.ceil((state.value.miles || 0) + 1));
-    return { state, connected, nextLap, nextMile };
+    const now = ref(Date.now());
+    const journey = computed(() => state.value.journey || {});
+    const activeSpecialLap = computed(() => {
+      const specialLap = state.value.active_special_lap;
+      return getRemainingSeconds(specialLap, now.value) > 0 ? specialLap : null;
+    });
+    const specialPrompt = computed(() => {
+      const preset = specialLapPresets.find((item) => item.image_path === activeSpecialLap.value?.image_path);
+      return preset?.prompt || 'Make this lap count!';
+    });
+    const specialRemaining = computed(() => getRemainingSeconds(activeSpecialLap.value, now.value));
+    const specialCountdown = computed(() => formatDuration(specialRemaining.value));
+    const distanceToNext = computed(() => Number(journey.value.distance_to_next || 0).toFixed(1));
+    const reachedStops = computed(() => (journey.value.stops || []).filter((stop) => stop.reached).length);
+    let timer;
+
+    onMounted(() => {
+      timer = setInterval(() => {
+        now.value = Date.now();
+      }, 1000);
+    });
+
+    onUnmounted(() => {
+      clearInterval(timer);
+    });
+
+    return {
+      state,
+      connected,
+      journey,
+      activeSpecialLap,
+      specialPrompt,
+      specialCountdown,
+      distanceToNext,
+      reachedStops,
+    };
   },
   template: `
     <main class="screen tv">
@@ -231,10 +298,41 @@ const TV = {
             <span>miles</span>
           </div>
         </div>
-        <div class="milestones">
-          <p>Next lap milestone: {{ nextLap.toLocaleString() }} laps</p>
-          <p>Next distance milestone: {{ nextMile.toLocaleString() }} miles</p>
-        </div>
+        <section v-if="journey.current" class="journey-panel">
+          <div class="journey-copy">
+            <p>{{ journey.title }}</p>
+            <h2>{{ journey.completed ? 'We made it to Washington, DC!' : 'Now passing: ' + journey.current.name }}</h2>
+            <strong v-if="journey.next">Next up: {{ journey.next.name }} - {{ distanceToNext }} miles away</strong>
+            <strong v-else>Destination reached</strong>
+          </div>
+          <div class="route-bar" aria-hidden="true">
+            <span :style="{ width: (journey.progress_percent || 0) + '%' }"></span>
+          </div>
+          <ol class="route-stops">
+            <li
+              v-for="stop in journey.stops"
+              :key="stop.name"
+              :class="{ reached: stop.reached, major: stop.major }"
+            >
+              <span></span>
+              <strong>{{ stop.name }}</strong>
+              <small>{{ stop.distance }} miles from Cambridge</small>
+            </li>
+          </ol>
+          <div class="journey-stats">
+            <span>{{ Math.min(journey.miles || 0, journey.total_distance || 0).toFixed(1) }} / {{ journey.total_distance }} route miles</span>
+            <span>{{ reachedStops }} towns reached</span>
+          </div>
+        </section>
+        <section v-if="activeSpecialLap" class="special-tv">
+          <img :src="activeSpecialLap.image_path" :alt="activeSpecialLap.name" />
+          <div>
+            <p>Special lap</p>
+            <h2>{{ activeSpecialLap.name }}</h2>
+            <strong>{{ specialPrompt }}</strong>
+          </div>
+          <time>{{ specialCountdown }}</time>
+        </section>
       </section>
     </main>
   `,
@@ -253,10 +351,18 @@ const Admin = {
     const qr = ref('');
     const form = ref({ name: 'Move-a-thon 2026', lap_distance_miles: 0.25, official_code: 'run' });
     const edit = ref(null);
+    const specialDurationMinutes = ref(3);
+    const now = ref(Date.now());
+    const activeSpecialLap = computed(() => {
+      const specialLap = state.value.active_special_lap;
+      return getRemainingSeconds(specialLap, now.value) > 0 ? specialLap : null;
+    });
+    const specialCountdown = computed(() => formatDuration(getRemainingSeconds(activeSpecialLap.value, now.value)));
 
     const refresh = async () => {
       await load();
       schoolName.value = state.value.school_name;
+      specialDurationMinutes.value = Math.max(1, Math.round((state.value.special_lap_duration_seconds || 180) / 60));
       events.value = await api('/api/events');
       await makeQr();
     };
@@ -277,7 +383,13 @@ const Admin = {
     };
 
     const saveSettings = async () => {
-      await api('/api/admin/settings', { method: 'POST', body: JSON.stringify({ school_name: schoolName.value }) });
+      await api('/api/admin/settings', {
+        method: 'POST',
+        body: JSON.stringify({
+          school_name: schoolName.value,
+          special_lap_duration_seconds: Number(specialDurationMinutes.value) * 60,
+        }),
+      });
       await refresh();
     };
 
@@ -307,11 +419,32 @@ const Admin = {
       await refresh();
     };
 
+    const startSpecialLap = async (preset) => {
+      state.value = await api('/api/admin/special-lap', { method: 'POST', body: JSON.stringify(preset) });
+    };
+
+    const clearSpecialLap = async () => {
+      state.value = await api('/api/admin/special-lap', { method: 'DELETE' });
+    };
+
     const exportUrl = (event) => `/api/admin/export/${event.id}.csv`;
 
+    let timer;
+    onMounted(() => {
+      timer = setInterval(() => {
+        now.value = Date.now();
+      }, 1000);
+    });
+
+    onUnmounted(() => {
+      clearInterval(timer);
+    });
+
     return {
-      state, connected, pin, loggedIn, error, events, schoolName, correction, qr, form, edit,
-      login, refresh, saveSettings, createEvent, startEdit, saveEdit, activate, addCorrection, exportUrl,
+      state, connected, pin, loggedIn, error, events, schoolName, correction, qr, form, edit, specialDurationMinutes,
+      specialLapPresets, activeSpecialLap, specialCountdown,
+      login, refresh, saveSettings, createEvent, startEdit, saveEdit, activate, addCorrection, startSpecialLap,
+      clearSpecialLap, exportUrl,
     };
   },
   template: `
@@ -343,8 +476,34 @@ const Admin = {
           <h2>School</h2>
           <form @submit.prevent="saveSettings" class="inline-form">
             <input v-model="schoolName" />
+            <label class="field-label">
+              Special lap minutes
+              <input v-model.number="specialDurationMinutes" type="number" min="1" max="60" step="1" />
+            </label>
             <button>Save</button>
           </form>
+        </div>
+
+        <div class="panel wide special-admin">
+          <div class="panel-head">
+            <div>
+              <h2>Special Lap</h2>
+              <p v-if="activeSpecialLap" class="muted">Showing {{ activeSpecialLap.name }} for {{ specialCountdown }}</p>
+              <p v-else class="muted">Pick one to send it to the TV for {{ specialDurationMinutes }} minutes.</p>
+            </div>
+            <button v-if="activeSpecialLap" class="secondary" @click="clearSpecialLap">Clear</button>
+          </div>
+          <div class="special-grid">
+            <button
+              v-for="preset in specialLapPresets"
+              :key="preset.image_path"
+              class="special-choice"
+              @click="startSpecialLap(preset)"
+            >
+              <img :src="preset.image_path" :alt="preset.name" />
+              <span>{{ preset.name }}</span>
+            </button>
+          </div>
         </div>
 
         <div class="panel">
