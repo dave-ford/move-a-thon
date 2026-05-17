@@ -284,10 +284,9 @@ const TV = {
       <Nav />
       <section class="tv-stage">
         <div class="tv-head">
-          <p>{{ state.school_name }}</p>
+          <p>{{ state.school_name }} <span>{{ state.event?.name || 'No active event' }}</span></p>
           <span :class="{ online: connected }">{{ connected ? 'live' : 'reconnecting' }}</span>
         </div>
-        <h1>{{ state.event?.name || 'No active event' }}</h1>
         <div class="scoreboard">
           <div>
             <strong>{{ (state.laps || 0).toLocaleString() }}</strong>
